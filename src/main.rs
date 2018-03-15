@@ -52,11 +52,28 @@ fn main() {
     loop {
         let mut input = String::new();
         stdin().read_line(&mut input).unwrap();
-        let mov = San::from_str(input.trim()).unwrap().to_move(&game).unwrap();
-        game = game.play(&mov).unwrap();
+        let mov = San::from_str(input.trim());
+        match mov {
+            Err(_) => {
+                eprintln!("Invalid move. Try again");
+                continue;
+            }
+            Ok(mov) => {
+                let mov = mov.to_move(&game);
+                match mov {
+                    Err(_) => {
+                        eprintln!("Illegal move. Try again");
+                        continue;
+                    }
+                    Ok(mov) => {
+                        game = game.play(&mov).unwrap();
+                        moves.push(format!("{}{}", mov.from().unwrap(), mov.to()));
+                        println!("{:?}", game.board());
+                    }
+                }
+            }
+        }
 
-        moves.push(format!("{}{}", mov.from().unwrap(), mov.to()));
-        println!("{:?}", game.board());
 
         engine.make_moves(&moves).unwrap();
         let engine_move_str = engine.bestmove().unwrap();
