@@ -1,16 +1,20 @@
-extern crate shakmaty;
-extern crate uci;
 extern crate env_logger;
 extern crate pgn_reader;
+extern crate shakmaty;
+extern crate uci;
 
-use uci::Engine;
-use shakmaty::Chess;
+use shakmaty::fen::Fen;
 use shakmaty::san::San;
-use shakmaty::Square;
-use shakmaty::Role;
-use shakmaty::Position;
+use shakmaty::Board;
 use shakmaty::CastlingSide;
-use shakmaty::Setup;
+use shakmaty::Chess;
+use shakmaty::File;
+use shakmaty::Piece;
+use shakmaty::Position;
+use shakmaty::Rank;
+use shakmaty::Role;
+use shakmaty::Square;
+use uci::Engine;
 
 use std::io::stdin;
 use std::str::FromStr;
@@ -32,12 +36,43 @@ fn parse_move(s: &str, game: &Chess) -> San {
         }
     } else {
         San::Normal {
-            role: role,
+            role,
             file: Some(from.file()),
             rank: Some(from.rank()),
-            capture: ! game.board().role_at(to).is_none(),
-            to: to,
-            promotion: promotion,
+            capture: game.board().role_at(to).is_some(),
+            to,
+            promotion,
+        }
+    }
+}
+
+fn piece_to_char(p: Piece) -> char {
+    p.color.fold_wb(
+        match p.role {
+            Role::Pawn => '♟',
+            Role::Knight => '♞',
+            Role::Bishop => '♝',
+            Role::Rook => '♜',
+            Role::Queen => '♛',
+            Role::King => '♚',
+        },
+        match p.role {
+            Role::Pawn => '♙',
+            Role::Knight => '♘',
+            Role::Bishop => '♗',
+            Role::Rook => '♖',
+            Role::Queen => '♕',
+            Role::King => '♔',
+        },
+    )
+}
+
+fn print_board(board: &Board) {
+    for rank in Rank::ALL.iter().rev() {
+        for file in File::ALL {
+            let square = Square::from_coords(file, *rank);
+            print!("{}", board.piece_at(square).map_or('.', piece_to_char));
+            print!("{}", if file < File::H { ' ' } else { '\n' });
         }
     }
 }
@@ -52,35 +87,36 @@ fn main() {
     loop {
         let mut input = String::new();
         stdin().read_line(&mut input).unwrap();
-        let mov = San::from_str(input.trim());
-        match mov {
+        match San::from_str(input.trim()) {
             Err(_) => {
                 eprintln!("Invalid move. Try again");
                 continue;
             }
-            Ok(mov) => {
-                let mov = mov.to_move(&game);
-                match mov {
-                    Err(_) => {
-                        eprintln!("Illegal move. Try again");
-                        continue;
-                    }
-                    Ok(mov) => {
-                        game = game.play(&mov).unwrap();
-                        moves.push(format!("{}{}", mov.from().unwrap(), mov.to()));
-                        println!("{:?}", game.board());
-                    }
+            Ok(san) => match san.to_move(&game) {
+                Err(_) => {
+                    eprintln!("Illegal move. Try again");
+                    continue;
                 }
-            }
+                Ok(mov) => {
+                    game = game.play(&mov).unwrap();
+                    moves.push(format!("{}{}", mov.from().unwrap(), mov.to()));
+                    print_board(game.board());
+                }
+            },
         }
 
-
-        engine.make_moves(&moves).unwrap();
+        engine
+            .set_position(
+                Fen::from_position(game.clone(), shakmaty::EnPassantMode::Always)
+                    .to_string()
+                    .as_ref(),
+            )
+            .unwrap();
         let engine_move_str = engine.bestmove().unwrap();
         println!("{}", engine_move_str);
         let engine_move = parse_move(&engine_move_str, &game).to_move(&game).unwrap();
         game = game.play(&engine_move).unwrap();
-        println!("{:?}", game.board());
+        print_board(game.board());
         moves.push(engine_move_str);
     }
 }
