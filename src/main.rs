@@ -78,7 +78,7 @@ fn print_board(board: &Board) {
 }
 
 fn main() {
-    env_logger::init().unwrap();
+    env_logger::init();
 
     let engine = Engine::new("stockfish").unwrap().movetime(50);
     let mut game = Chess::default();
