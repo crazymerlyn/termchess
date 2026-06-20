@@ -138,7 +138,7 @@ fn render(board: &Board, moves: &[String], status: &str) {
     if !moves.is_empty() {
         println!("  Moves:");
         let total = moves.len();
-        let start = total.saturating_sub(16);
+        let start = total.saturating_sub(32);
         if start > 0 {
             println!("  ...");
         }
@@ -178,7 +178,19 @@ fn main() {
         }
         match San::from_str(&normalize_san(&input)) {
             Err(_) => {
-                render(game.board(), &moves, "Invalid move. Use e4 (pawn), Nf3 (piece), or O-O (castle):");
+                let hint = if input.trim().starts_with('b') {
+                    " (use B for bishop, e.g. Bc3)"
+                } else {
+                    ""
+                };
+                render(
+                    game.board(),
+                    &moves,
+                    &format!(
+                        "Invalid move. Use e4 (pawn), Nf3 (piece), or O-O (castle):{}",
+                        hint
+                    ),
+                );
                 continue;
             }
             Ok(san) => match san.to_move(&game) {
