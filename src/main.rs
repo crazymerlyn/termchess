@@ -97,6 +97,18 @@ fn piece_to_char(p: Piece) -> char {
     )
 }
 
+fn check_draw(positions: &[String], halfmove_clock: u32) -> Option<String> {
+    if halfmove_clock >= 100 {
+        return Some("Draw by 50-move rule".to_string());
+    }
+    if let Some(last) = positions.last() {
+        if positions.iter().filter(|p| *p == last).count() >= 3 {
+            return Some("Draw by threefold repetition".to_string());
+        }
+    }
+    None
+}
+
 fn render(board: &Board, moves: &[String], status: &str) {
     print!("\x1b[2J\x1b[H");
     println!("  {}", status);
@@ -151,6 +163,10 @@ fn main() {
     };
     let mut game = Chess::default();
     let mut moves: Vec<String> = vec![];
+    let mut positions: Vec<String> = vec![
+        Fen::from_position(game.clone(), shakmaty::EnPassantMode::Always).to_string(),
+    ];
+    let mut halfmove_clock: u32 = 0;
 
     render(game.board(), &moves, "Welcome to termchess!");
 
@@ -172,24 +188,51 @@ fn main() {
                 }
                 Ok(mov) => {
                     let san_str = San::from_move(&game, &mov).to_string();
-                    game = game.play(&mov).unwrap();
+                    let role = game.board().role_at(mov.from().unwrap());
+                    let capture = game.board().role_at(mov.to()).is_some()
+                        || game.ep_square(shakmaty::EnPassantMode::Always) == Some(mov.to());
+                    match game.play(&mov) {
+                        Err(_) => {
+                            eprintln!("Internal error: failed to play move");
+                            break;
+                        }
+                        Ok(new_game) => game = new_game,
+                    }
+                    if role == Some(Role::Pawn) || capture {
+                        halfmove_clock = 0;
+                    } else {
+                        halfmove_clock += 1;
+                    }
                     moves.push(san_str);
+                    positions.push(
+                        Fen::from_position(game.clone(), shakmaty::EnPassantMode::Always)
+                            .to_string(),
+                    );
 
                     if let Some(outcome) = game.outcome() {
                         render(game.board(), &moves, &format!("Game over! {}", outcome));
                         break;
                     }
+                    if let Some(msg) = check_draw(&positions, halfmove_clock) {
+                        render(game.board(), &moves, &msg);
+                        break;
+                    }
 
                     render(game.board(), &moves, "Thinking...");
 
-                    engine
-                        .set_position(
-                            Fen::from_position(game.clone(), shakmaty::EnPassantMode::Always)
-                                .to_string()
-                                .as_ref(),
-                        )
-                        .unwrap();
-                    let engine_move_str = engine.bestmove().unwrap();
+                    let fen = Fen::from_position(game.clone(), shakmaty::EnPassantMode::Always)
+                        .to_string();
+                    if engine.set_position(&fen).is_err() {
+                        render(game.board(), &moves, "Engine error: failed to set position");
+                        break;
+                    }
+                    let engine_move_str = match engine.bestmove() {
+                        Err(_) => {
+                            render(game.board(), &moves, "Engine error: failed to get best move");
+                            break;
+                        }
+                        Ok(m) => m,
+                    };
 
                     let engine_san = match parse_move(&engine_move_str, &game) {
                         None => {
@@ -214,6 +257,9 @@ fn main() {
                         Ok(m) => m,
                     };
                     let san_str = San::from_move(&game, &engine_move).to_string();
+                    let role = game.board().role_at(engine_move.from().unwrap());
+                    let capture = game.board().role_at(engine_move.to()).is_some()
+                        || game.ep_square(shakmaty::EnPassantMode::Always) == Some(engine_move.to());
                     match game.play(&engine_move) {
                         Err(_) => {
                             eprintln!("Engine error: could not play {}", engine_move_str);
@@ -221,10 +267,23 @@ fn main() {
                         }
                         Ok(new_game) => {
                             game = new_game;
+                            if role == Some(Role::Pawn) || capture {
+                                halfmove_clock = 0;
+                            } else {
+                                halfmove_clock += 1;
+                            }
                             moves.push(san_str);
+                            positions.push(
+                                Fen::from_position(game.clone(), shakmaty::EnPassantMode::Always)
+                                    .to_string(),
+                            );
 
                             if let Some(outcome) = game.outcome() {
                                 render(game.board(), &moves, &format!("Game over! {}", outcome));
+                                break;
+                            }
+                            if let Some(msg) = check_draw(&positions, halfmove_clock) {
+                                render(game.board(), &moves, &msg);
                                 break;
                             }
                         }
