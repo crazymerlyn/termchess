@@ -133,6 +133,25 @@ fn apply_move(
     Ok(())
 }
 
+fn play_engine_move(
+    engine: &Engine,
+    game: &mut Chess,
+    halfmove_clock: &mut u32,
+    moves: &mut Vec<String>,
+    positions: &mut Vec<String>,
+    game_states: &mut Vec<Chess>,
+    clock_history: &mut Vec<u32>,
+) -> Result<shakmaty::Move, String> {
+    let fen = board_fen(game);
+    engine.set_position(&fen).map_err(|_| "Engine error: failed to set position".to_string())?;
+    let engine_move_str = engine.bestmove().map_err(|_| "Engine error: failed to get best move".to_string())?;
+    let engine_san = parse_move(&engine_move_str, game).ok_or_else(|| format!("Engine error: illegal move {}", engine_move_str))?;
+    let engine_move = engine_san.to_move(game).map_err(|_| format!("Engine error: illegal move {}", engine_move_str))?;
+    apply_move(game, &engine_move, halfmove_clock, moves, positions, game_states, clock_history)
+        .map_err(|_| format!("Engine error: could not play {}", engine_move_str))?;
+    Ok(engine_move)
+}
+
 fn check_draw(positions: &[String], halfmove_clock: u32) -> Option<String> {
     if halfmove_clock >= 100 {
         return Some("Draw by 50-move rule".to_string());
@@ -145,7 +164,7 @@ fn check_draw(positions: &[String], halfmove_clock: u32) -> Option<String> {
     None
 }
 
-fn render(board: &Board, moves: &[String], status: &str, last_move: Option<(Square, Square)>) {
+fn render(board: &Board, moves: &[String], status: &str, last_move: Option<(Square, Square)>, flip: bool) {
     print!("\x1b[2J\x1b[H");
     println!("  {}", status);
     println!();
@@ -154,7 +173,8 @@ fn render(board: &Board, moves: &[String], status: &str, last_move: Option<(Squa
         print!(" {} ", f.char());
     }
     println!();
-    for rank in Rank::ALL.iter().rev() {
+    let ranks: Vec<&Rank> = if flip { Rank::ALL.iter().collect() } else { Rank::ALL.iter().rev().collect() };
+    for rank in ranks {
         print!(" {} ", rank.char());
         for file in File::ALL {
             let square = Square::from_coords(file, *rank);
@@ -196,16 +216,38 @@ fn render(board: &Board, moves: &[String], status: &str, last_move: Option<(Squa
     let _ = stdout().flush();
 }
 
-fn parse_args() -> Option<String> {
+struct Config {
+    engine_path: String,
+    play_as_black: bool,
+}
+
+fn parse_args() -> Config {
+    let mut engine_path: Option<String> = None;
+    let mut play_as_black = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--engine" | "-e" => {
-                return Some(args.next().unwrap_or_else(|| {
+                engine_path = Some(args.next().unwrap_or_else(|| {
                     eprintln!("error: --engine requires a path argument");
                     eprintln!("Try `termchess --help` for more information.");
                     std::process::exit(1);
                 }));
+            }
+            "--side" | "-s" => {
+                let side = args.next().unwrap_or_else(|| {
+                    eprintln!("error: --side requires an argument (white or black)");
+                    eprintln!("Try `termchess --help` for more information.");
+                    std::process::exit(1);
+                });
+                match side.as_str() {
+                    "black" => play_as_black = true,
+                    "white" => {}
+                    _ => {
+                        eprintln!("error: invalid side '{}' (use white or black)", side);
+                        std::process::exit(1);
+                    }
+                }
             }
             "--help" | "-h" => {
                 println!("Usage: termchess [OPTIONS]");
@@ -215,6 +257,7 @@ fn parse_args() -> Option<String> {
                 println!("Options:");
                 println!("  -e, --engine <PATH>  Path to UCI engine executable");
                 println!("                        (default: stockfish, or $STOCKFISH_PATH)");
+                println!("  -s, --side <SIDE>    Play as white or black (default: white)");
                 println!("  -h, --help           Print this help message");
                 println!("  -V, --version        Print version");
                 std::process::exit(0);
@@ -230,19 +273,22 @@ fn parse_args() -> Option<String> {
             }
         }
     }
-    None
+    Config {
+        engine_path: engine_path.unwrap_or_else(|| {
+            std::env::var("STOCKFISH_PATH")
+                .ok()
+                .unwrap_or_else(|| "stockfish".to_string())
+        }),
+        play_as_black,
+    }
 }
 
 fn main() {
-    let engine_path = parse_args().unwrap_or_else(|| {
-        std::env::var("STOCKFISH_PATH")
-            .ok()
-            .unwrap_or_else(|| "stockfish".to_string())
-    });
-    let engine = match Engine::new(&engine_path) {
+    let cfg = parse_args();
+    let engine = match Engine::new(&cfg.engine_path) {
         Ok(eng) => eng.movetime(500),
         Err(e) => {
-            eprintln!("Failed to start engine '{}': {}", engine_path, e);
+            eprintln!("Failed to start engine '{}': {}", cfg.engine_path, e);
             std::process::exit(1);
         }
     };
@@ -253,13 +299,28 @@ fn main() {
     let mut game_states: Vec<Chess> = vec![game.clone()];
     let mut clock_history: Vec<u32> = vec![0];
     let mut last_move: Option<(Square, Square)> = None;
+    let flip = cfg.play_as_black;
 
-    render(
-        game.board(),
-        &moves,
-        "Welcome to termchess! Enter a move, or type undo/resign/draw.",
-        last_move,
-    );
+    if cfg.play_as_black {
+        match play_engine_move(&engine, &mut game, &mut halfmove_clock, &mut moves, &mut positions, &mut game_states, &mut clock_history) {
+            Ok(m) => {
+                last_move = Some((m.from().unwrap(), m.to()));
+                render(game.board(), &moves, "Black to move:", last_move, flip);
+            }
+            Err(e) => {
+                render(game.board(), &moves, &e, last_move, flip);
+                return;
+            }
+        }
+    } else {
+        render(
+            game.board(),
+            &moves,
+            "Welcome to termchess! Enter a move, or type undo/resign/draw.",
+            last_move,
+            flip,
+        );
+    }
 
     loop {
         let mut input = String::new();
@@ -283,9 +344,9 @@ fn main() {
                     } else {
                         "Black"
                     };
-                    render(game.board(), &moves, &format!("Undo. {} to move:", side), last_move);
+                    render(game.board(), &moves, &format!("Undo. {} to move:", side), last_move, flip);
                 } else {
-                    render(game.board(), &moves, "Nothing to undo.", last_move);
+                    render(game.board(), &moves, "Nothing to undo.", last_move, flip);
                 }
                 continue;
             }
@@ -300,6 +361,7 @@ fn main() {
                     &moves,
                     &format!("{} wins by resignation! Press Enter to exit.", winner),
                     last_move,
+                    flip,
                 );
                 let _ = stdin().read_line(&mut String::new());
                 break;
@@ -310,6 +372,7 @@ fn main() {
                     &moves,
                     "Draw by agreement! Press Enter to exit.",
                     last_move,
+                    flip,
                 );
                 let _ = stdin().read_line(&mut String::new());
                 break;
@@ -320,6 +383,7 @@ fn main() {
                     &moves,
                     "Commands: e4 (pawn), Nf3 (piece), O-O (castle), undo (u), resign, draw, help (h)",
                     last_move,
+                    flip,
                 );
                 continue;
             }
@@ -340,12 +404,13 @@ fn main() {
                         hint
                     ),
                     last_move,
+                    flip,
                 );
                 continue;
             }
             Ok(san) => match san.to_move(&game) {
                 Err(_) => {
-                    render(game.board(), &moves, "Illegal move. Try again:", last_move);
+                    render(game.board(), &moves, "Illegal move. Try again:", last_move, flip);
                     continue;
                 }
                 Ok(mov) => {
@@ -364,85 +429,32 @@ fn main() {
                     last_move = Some((mov.from().unwrap(), mov.to()));
 
                     if let Some(outcome) = game.outcome() {
-                        render(game.board(), &moves, &format!("Game over! {}", outcome), last_move);
+                        render(game.board(), &moves, &format!("Game over! {}", outcome), last_move, flip);
                         break;
                     }
                     if let Some(msg) = check_draw(&positions, halfmove_clock) {
-                        render(game.board(), &moves, &msg, last_move);
+                        render(game.board(), &moves, &msg, last_move, flip);
                         break;
                     }
 
-                    render(game.board(), &moves, "Thinking...", last_move);
+                    render(game.board(), &moves, "Thinking...", last_move, flip);
 
-                    let fen = board_fen(&game);
-                    if engine.set_position(&fen).is_err() {
-                        render(game.board(), &moves, "Engine error: failed to set position", last_move);
-                        break;
+                    match play_engine_move(&engine, &mut game, &mut halfmove_clock, &mut moves, &mut positions, &mut game_states, &mut clock_history) {
+                        Ok(m) => {
+                            last_move = Some((m.from().unwrap(), m.to()));
+                        }
+                        Err(e) => {
+                            render(game.board(), &moves, &e, last_move, flip);
+                            break;
+                        }
                     }
-                    let engine_move_str = match engine.bestmove() {
-                        Err(_) => {
-                            render(
-                                game.board(),
-                                &moves,
-                                "Engine error: failed to get best move",
-                                last_move,
-                            );
-                            break;
-                        }
-                        Ok(m) => m,
-                    };
-
-                    let engine_san = match parse_move(&engine_move_str, &game) {
-                        None => {
-                            render(
-                                game.board(),
-                                &moves,
-                                &format!("Engine error: illegal move {}", engine_move_str),
-                                last_move,
-                            );
-                            break;
-                        }
-                        Some(s) => s,
-                    };
-                    let engine_move = match engine_san.to_move(&game) {
-                        Err(_) => {
-                            render(
-                                game.board(),
-                                &moves,
-                                &format!("Engine error: illegal move {}", engine_move_str),
-                                last_move,
-                            );
-                            break;
-                        }
-                        Ok(m) => m,
-                    };
-                    if apply_move(
-                        &mut game,
-                        &engine_move,
-                        &mut halfmove_clock,
-                        &mut moves,
-                        &mut positions,
-                        &mut game_states,
-                        &mut clock_history,
-                    )
-                    .is_err()
-                    {
-                        render(
-                            game.board(),
-                            &moves,
-                            &format!("Engine error: could not play {}", engine_move_str),
-                            last_move,
-                        );
-                        break;
-                    }
-                    last_move = Some((engine_move.from().unwrap(), engine_move.to()));
 
                     if let Some(outcome) = game.outcome() {
-                        render(game.board(), &moves, &format!("Game over! {}", outcome), last_move);
+                        render(game.board(), &moves, &format!("Game over! {}", outcome), last_move, flip);
                         break;
                     }
                     if let Some(msg) = check_draw(&positions, halfmove_clock) {
-                        render(game.board(), &moves, &msg, last_move);
+                        render(game.board(), &moves, &msg, last_move, flip);
                         break;
                     }
 
@@ -451,7 +463,7 @@ fn main() {
                     } else {
                         "Black"
                     };
-                    render(game.board(), &moves, &format!("{} to move:", side), last_move);
+                    render(game.board(), &moves, &format!("{} to move:", side), last_move, flip);
                 }
             },
         }
