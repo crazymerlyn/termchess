@@ -135,7 +135,7 @@ fn render(board: &Board, moves: &[String], status: &str) {
         println!();
     }
     print!("  Your move: ");
-    stdout().flush().unwrap();
+    let _ = stdout().flush();
 }
 
 fn main() {
@@ -153,7 +153,10 @@ fn main() {
 
     loop {
         let mut input = String::new();
-        stdin().read_line(&mut input).unwrap();
+        match stdin().read_line(&mut input) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
         match San::from_str(&normalize_san(&input)) {
             Err(_) => {
                 render(game.board(), &moves, "Invalid move. Try again:");
@@ -169,8 +172,8 @@ fn main() {
                     game = game.play(&mov).unwrap();
                     moves.push(san_str);
 
-                    if game.outcome().is_some() {
-                        render(game.board(), &moves, "Game over!");
+                    if let Some(outcome) = game.outcome() {
+                        render(game.board(), &moves, &format!("Game over! {}", outcome));
                         break;
                     }
 
@@ -217,14 +220,15 @@ fn main() {
                             game = new_game;
                             moves.push(san_str);
 
-                            if game.outcome().is_some() {
-                                render(game.board(), &moves, "Game over!");
+                            if let Some(outcome) = game.outcome() {
+                                render(game.board(), &moves, &format!("Game over! {}", outcome));
                                 break;
                             }
                         }
                     }
 
-                    render(game.board(), &moves, "Your turn:");
+                    let side = if game.turn().is_white() { "White" } else { "Black" };
+                    render(game.board(), &moves, &format!("{} to move:", side));
                 }
             },
         }
