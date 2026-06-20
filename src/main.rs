@@ -1,8 +1,3 @@
-extern crate env_logger;
-extern crate pgn_reader;
-extern crate shakmaty;
-extern crate uci;
-
 use shakmaty::fen::Fen;
 use shakmaty::san::San;
 use shakmaty::Board;
@@ -16,7 +11,7 @@ use shakmaty::Role;
 use shakmaty::Square;
 use uci::Engine;
 
-use std::io::stdin;
+use std::io::{stdout, Write, stdin};
 use std::str::FromStr;
 
 fn parse_move(s: &str, game: &Chess) -> San {
@@ -88,19 +83,22 @@ fn print_board(board: &Board) {
 }
 
 fn main() {
-    env_logger::init();
-
     let engine = match Engine::new("stockfish") {
-        Ok(eng) => eng.movetime(50),
+        Ok(eng) => eng.movetime(500),
         Err(e) => {
             eprintln!("Failed to start Stockfish: {}. Is it installed and on your PATH?", e);
             return;
         }
     };
     let mut game = Chess::default();
-    let mut moves = vec![];
+
+    println!("Welcome to termchess!");
+    println!("Enter moves in standard algebraic notation (e.g. e4, Nf3, O-O).");
+    print_board(game.board());
 
     loop {
+        print!("Your move: ");
+        stdout().flush().unwrap();
         let mut input = String::new();
         stdin().read_line(&mut input).unwrap();
         match San::from_str(input.trim()) {
@@ -115,7 +113,6 @@ fn main() {
                 }
                 Ok(mov) => {
                     game = game.play(&mov).unwrap();
-                    moves.push(format!("{}{}", mov.from().unwrap(), mov.to()));
                     print_board(game.board());
                     if game.outcome().is_some() {
                         println!("Game over!");
@@ -151,7 +148,6 @@ fn main() {
                 Ok(new_game) => {
                     game = new_game;
                     print_board(game.board());
-                    moves.push(engine_move_str);
                 }
             },
         }
