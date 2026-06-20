@@ -29,10 +29,20 @@ fn parse_move(s: &str, game: &Chess) -> San {
     };
     let role = game.board().role_at(from).unwrap();
     if role == Role::King {
-        if from.file() - to.file() == 2 {
+        let file_diff: i32 = from.file() - to.file();
+        if file_diff == 2 {
+            San::Castle(CastlingSide::QueenSide)
+        } else if file_diff == -2 {
             San::Castle(CastlingSide::KingSide)
         } else {
-            San::Castle(CastlingSide::QueenSide)
+            San::Normal {
+                role,
+                file: Some(from.file()),
+                rank: Some(from.rank()),
+                capture: game.board().role_at(to).is_some(),
+                to,
+                promotion,
+            }
         }
     } else {
         San::Normal {
@@ -80,7 +90,13 @@ fn print_board(board: &Board) {
 fn main() {
     env_logger::init();
 
-    let engine = Engine::new("stockfish").unwrap().movetime(50);
+    let engine = match Engine::new("stockfish") {
+        Ok(eng) => eng.movetime(50),
+        Err(e) => {
+            eprintln!("Failed to start Stockfish: {}. Is it installed and on your PATH?", e);
+            return;
+        }
+    };
     let mut game = Chess::default();
     let mut moves = vec![];
 
@@ -101,8 +117,16 @@ fn main() {
                     game = game.play(&mov).unwrap();
                     moves.push(format!("{}{}", mov.from().unwrap(), mov.to()));
                     print_board(game.board());
+                    if game.outcome().is_some() {
+                        println!("Game over!");
+                        break;
+                    }
                 }
             },
+        }
+
+        if game.outcome().is_some() {
+            break;
         }
 
         engine
@@ -114,9 +138,22 @@ fn main() {
             .unwrap();
         let engine_move_str = engine.bestmove().unwrap();
         println!("{}", engine_move_str);
-        let engine_move = parse_move(&engine_move_str, &game).to_move(&game).unwrap();
-        game = game.play(&engine_move).unwrap();
-        print_board(game.board());
-        moves.push(engine_move_str);
+        match parse_move(&engine_move_str, &game).to_move(&game) {
+            Err(_) => {
+                eprintln!("Engine returned illegal move: {}", engine_move_str);
+                break;
+            }
+            Ok(engine_move) => match game.play(&engine_move) {
+                Err(_) => {
+                    eprintln!("Engine move could not be played: {}", engine_move_str);
+                    break;
+                }
+                Ok(new_game) => {
+                    game = new_game;
+                    print_board(game.board());
+                    moves.push(engine_move_str);
+                }
+            },
+        }
     }
 }
