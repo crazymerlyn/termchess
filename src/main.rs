@@ -167,6 +167,8 @@ fn main() {
         Fen::from_position(game.clone(), shakmaty::EnPassantMode::Always).to_string(),
     ];
     let mut halfmove_clock: u32 = 0;
+    let mut game_states: Vec<Chess> = vec![game.clone()];
+    let mut clock_history: Vec<u32> = vec![0];
 
     render(game.board(), &moves, "Welcome to termchess!");
 
@@ -175,6 +177,32 @@ fn main() {
         match stdin().read_line(&mut input) {
             Ok(0) | Err(_) => break,
             Ok(_) => {}
+        }
+        let cmd = input.trim().to_lowercase();
+        match cmd.as_str() {
+            "undo" | "u" => {
+                if moves.len() >= 2 {
+                    game_states.truncate(game_states.len() - 2);
+                    clock_history.truncate(clock_history.len() - 2);
+                    game = game_states.last().unwrap().clone();
+                    halfmove_clock = *clock_history.last().unwrap();
+                    moves.truncate(moves.len() - 2);
+                    positions.truncate(positions.len() - 2);
+                }
+                let side = if game.turn().is_white() { "White" } else { "Black" };
+                render(game.board(), &moves, &format!("Undo. {} to move:", side));
+                continue;
+            }
+            "resign" => {
+                let winner = if game.turn().is_white() { "Black" } else { "White" };
+                render(game.board(), &moves, &format!("{} wins by resignation!", winner));
+                break;
+            }
+            "draw" => {
+                render(game.board(), &moves, "Draw by agreement.");
+                break;
+            }
+            _ => {}
         }
         match San::from_str(&normalize_san(&input)) {
             Err(_) => {
