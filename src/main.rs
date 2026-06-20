@@ -94,9 +94,9 @@ fn piece_to_char(p: Piece) -> String {
         },
     );
     if p.color.is_white() {
-        format!("\x1b[1;97m{}\x1b[0m", ch)
+        format!("\x1b[97m{}", ch)
     } else {
-        format!("\x1b[1;31m{}\x1b[0m", ch)
+        format!("\x1b[31m{}", ch)
     }
 }
 
@@ -145,7 +145,7 @@ fn check_draw(positions: &[String], halfmove_clock: u32) -> Option<String> {
     None
 }
 
-fn render(board: &Board, moves: &[String], status: &str) {
+fn render(board: &Board, moves: &[String], status: &str, last_move: Option<(Square, Square)>) {
     print!("\x1b[2J\x1b[H");
     println!("  {}", status);
     println!();
@@ -158,9 +158,16 @@ fn render(board: &Board, moves: &[String], status: &str) {
         print!(" {} ", rank.char());
         for file in File::ALL {
             let square = Square::from_coords(file, *rank);
+            let hl = last_move.is_some() && (last_move.unwrap().0 == square || last_move.unwrap().1 == square);
+            if hl {
+                print!("\x1b[43m");
+            }
             match board.piece_at(square) {
                 Some(p) => print!(" {} ", piece_to_char(p)),
-                None => print!(" · "),
+                None => print!("\x1b[90m · \x1b[0m"),
+            }
+            if hl {
+                print!("\x1b[0m");
             }
         }
         println!(" {}", rank.char());
@@ -245,11 +252,13 @@ fn main() {
     let mut halfmove_clock: u32 = 0;
     let mut game_states: Vec<Chess> = vec![game.clone()];
     let mut clock_history: Vec<u32> = vec![0];
+    let mut last_move: Option<(Square, Square)> = None;
 
     render(
         game.board(),
         &moves,
         "Welcome to termchess! Enter a move, or type undo/resign/draw.",
+        last_move,
     );
 
     loop {
@@ -268,14 +277,15 @@ fn main() {
                     halfmove_clock = *clock_history.last().unwrap();
                     moves.truncate(moves.len() - 2);
                     positions.truncate(positions.len() - 2);
+                    last_move = None;
                     let side = if game.turn().is_white() {
                         "White"
                     } else {
                         "Black"
                     };
-                    render(game.board(), &moves, &format!("Undo. {} to move:", side));
+                    render(game.board(), &moves, &format!("Undo. {} to move:", side), last_move);
                 } else {
-                    render(game.board(), &moves, "Nothing to undo.");
+                    render(game.board(), &moves, "Nothing to undo.", last_move);
                 }
                 continue;
             }
@@ -289,6 +299,7 @@ fn main() {
                     game.board(),
                     &moves,
                     &format!("{} wins by resignation! Press Enter to exit.", winner),
+                    last_move,
                 );
                 let _ = stdin().read_line(&mut String::new());
                 break;
@@ -298,6 +309,7 @@ fn main() {
                     game.board(),
                     &moves,
                     "Draw by agreement! Press Enter to exit.",
+                    last_move,
                 );
                 let _ = stdin().read_line(&mut String::new());
                 break;
@@ -307,6 +319,7 @@ fn main() {
                     game.board(),
                     &moves,
                     "Commands: e4 (pawn), Nf3 (piece), O-O (castle), undo (u), resign, draw, help (h)",
+                    last_move,
                 );
                 continue;
             }
@@ -326,12 +339,13 @@ fn main() {
                         "Invalid move. Use e4 (pawn), Nf3 (piece), or O-O (castle):{}",
                         hint
                     ),
+                    last_move,
                 );
                 continue;
             }
             Ok(san) => match san.to_move(&game) {
                 Err(_) => {
-                    render(game.board(), &moves, "Illegal move. Try again:");
+                    render(game.board(), &moves, "Illegal move. Try again:", last_move);
                     continue;
                 }
                 Ok(mov) => {
@@ -347,21 +361,22 @@ fn main() {
                         eprintln!("{}", e);
                         break;
                     }
+                    last_move = Some((mov.from().unwrap(), mov.to()));
 
                     if let Some(outcome) = game.outcome() {
-                        render(game.board(), &moves, &format!("Game over! {}", outcome));
+                        render(game.board(), &moves, &format!("Game over! {}", outcome), last_move);
                         break;
                     }
                     if let Some(msg) = check_draw(&positions, halfmove_clock) {
-                        render(game.board(), &moves, &msg);
+                        render(game.board(), &moves, &msg, last_move);
                         break;
                     }
 
-                    render(game.board(), &moves, "Thinking...");
+                    render(game.board(), &moves, "Thinking...", last_move);
 
                     let fen = board_fen(&game);
                     if engine.set_position(&fen).is_err() {
-                        render(game.board(), &moves, "Engine error: failed to set position");
+                        render(game.board(), &moves, "Engine error: failed to set position", last_move);
                         break;
                     }
                     let engine_move_str = match engine.bestmove() {
@@ -370,6 +385,7 @@ fn main() {
                                 game.board(),
                                 &moves,
                                 "Engine error: failed to get best move",
+                                last_move,
                             );
                             break;
                         }
@@ -382,6 +398,7 @@ fn main() {
                                 game.board(),
                                 &moves,
                                 &format!("Engine error: illegal move {}", engine_move_str),
+                                last_move,
                             );
                             break;
                         }
@@ -393,6 +410,7 @@ fn main() {
                                 game.board(),
                                 &moves,
                                 &format!("Engine error: illegal move {}", engine_move_str),
+                                last_move,
                             );
                             break;
                         }
@@ -413,16 +431,18 @@ fn main() {
                             game.board(),
                             &moves,
                             &format!("Engine error: could not play {}", engine_move_str),
+                            last_move,
                         );
                         break;
                     }
+                    last_move = Some((engine_move.from().unwrap(), engine_move.to()));
 
                     if let Some(outcome) = game.outcome() {
-                        render(game.board(), &moves, &format!("Game over! {}", outcome));
+                        render(game.board(), &moves, &format!("Game over! {}", outcome), last_move);
                         break;
                     }
                     if let Some(msg) = check_draw(&positions, halfmove_clock) {
-                        render(game.board(), &moves, &msg);
+                        render(game.board(), &moves, &msg, last_move);
                         break;
                     }
 
@@ -431,7 +451,7 @@ fn main() {
                     } else {
                         "Black"
                     };
-                    render(game.board(), &moves, &format!("{} to move:", side));
+                    render(game.board(), &moves, &format!("{} to move:", side), last_move);
                 }
             },
         }
@@ -492,30 +512,30 @@ mod tests {
     #[test]
     fn test_piece_to_char() {
         let w = Piece { color: Color::White, role: Role::Pawn };
-        assert_eq!(piece_to_char(w), "\x1b[1;97m♙\x1b[0m");
+        assert_eq!(piece_to_char(w), "\x1b[97m♙");
         let w = Piece { color: Color::White, role: Role::Knight };
-        assert_eq!(piece_to_char(w), "\x1b[1;97m♘\x1b[0m");
+        assert_eq!(piece_to_char(w), "\x1b[97m♘");
         let w = Piece { color: Color::White, role: Role::Bishop };
-        assert_eq!(piece_to_char(w), "\x1b[1;97m♗\x1b[0m");
+        assert_eq!(piece_to_char(w), "\x1b[97m♗");
         let w = Piece { color: Color::White, role: Role::Rook };
-        assert_eq!(piece_to_char(w), "\x1b[1;97m♖\x1b[0m");
+        assert_eq!(piece_to_char(w), "\x1b[97m♖");
         let w = Piece { color: Color::White, role: Role::Queen };
-        assert_eq!(piece_to_char(w), "\x1b[1;97m♕\x1b[0m");
+        assert_eq!(piece_to_char(w), "\x1b[97m♕");
         let w = Piece { color: Color::White, role: Role::King };
-        assert_eq!(piece_to_char(w), "\x1b[1;97m♔\x1b[0m");
+        assert_eq!(piece_to_char(w), "\x1b[97m♔");
 
         let b = Piece { color: Color::Black, role: Role::Pawn };
-        assert_eq!(piece_to_char(b), "\x1b[1;31m♟\x1b[0m");
+        assert_eq!(piece_to_char(b), "\x1b[31m♟");
         let b = Piece { color: Color::Black, role: Role::Knight };
-        assert_eq!(piece_to_char(b), "\x1b[1;31m♞\x1b[0m");
+        assert_eq!(piece_to_char(b), "\x1b[31m♞");
         let b = Piece { color: Color::Black, role: Role::Bishop };
-        assert_eq!(piece_to_char(b), "\x1b[1;31m♝\x1b[0m");
+        assert_eq!(piece_to_char(b), "\x1b[31m♝");
         let b = Piece { color: Color::Black, role: Role::Rook };
-        assert_eq!(piece_to_char(b), "\x1b[1;31m♜\x1b[0m");
+        assert_eq!(piece_to_char(b), "\x1b[31m♜");
         let b = Piece { color: Color::Black, role: Role::Queen };
-        assert_eq!(piece_to_char(b), "\x1b[1;31m♛\x1b[0m");
+        assert_eq!(piece_to_char(b), "\x1b[31m♛");
         let b = Piece { color: Color::Black, role: Role::King };
-        assert_eq!(piece_to_char(b), "\x1b[1;31m♚\x1b[0m");
+        assert_eq!(piece_to_char(b), "\x1b[31m♚");
     }
 
     #[test]
