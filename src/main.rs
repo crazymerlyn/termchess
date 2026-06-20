@@ -65,15 +65,13 @@ fn parse_move(s: &str, game: &Chess) -> Option<San> {
     if role == Role::King {
         let file_diff: i32 = from.file() - to.file();
         if file_diff == 2 {
-            Some(San::Castle(CastlingSide::QueenSide))
-        } else if file_diff == -2 {
-            Some(San::Castle(CastlingSide::KingSide))
-        } else {
-            Some(normal_san(role, from, to, promotion, capture))
+            return Some(San::Castle(CastlingSide::QueenSide));
         }
-    } else {
-        Some(normal_san(role, from, to, promotion, capture))
+        if file_diff == -2 {
+            return Some(San::Castle(CastlingSide::KingSide));
+        }
     }
+    Some(normal_san(role, from, to, promotion, capture))
 }
 
 fn piece_to_char(p: Piece) -> char {
@@ -189,8 +187,35 @@ fn render(board: &Board, moves: &[String], status: &str) {
 fn parse_args() -> Option<String> {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
-        if arg == "--engine" || arg == "-e" {
-            return args.next();
+        match arg.as_str() {
+            "--engine" | "-e" => {
+                return Some(args.next().unwrap_or_else(|| {
+                    eprintln!("error: --engine requires a path argument");
+                    eprintln!("Try `termchess --help` for more information.");
+                    std::process::exit(1);
+                }));
+            }
+            "--help" | "-h" => {
+                println!("Usage: termchess [OPTIONS]");
+                println!();
+                println!("Play chess against a UCI engine.");
+                println!();
+                println!("Options:");
+                println!("  -e, --engine <PATH>  Path to UCI engine executable");
+                println!("                        (default: stockfish, or $STOCKFISH_PATH)");
+                println!("  -h, --help           Print this help message");
+                println!("  -V, --version        Print version");
+                std::process::exit(0);
+            }
+            "--version" | "-V" => {
+                println!("termchess {}", env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
+            _ => {
+                eprintln!("error: unknown flag '{}'", arg);
+                eprintln!("Try `termchess --help` for more information.");
+                std::process::exit(1);
+            }
         }
     }
     None
@@ -205,10 +230,7 @@ fn main() {
     let engine = match Engine::new(&engine_path) {
         Ok(eng) => eng.movetime(500),
         Err(e) => {
-            eprintln!(
-                "Failed to start engine '{}': {}. Is it installed and on your PATH?",
-                engine_path, e
-            );
+            eprintln!("Failed to start engine '{}': {}", engine_path, e);
             return;
         }
     };
