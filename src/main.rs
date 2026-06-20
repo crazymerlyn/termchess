@@ -231,7 +231,7 @@ fn main() {
         Ok(eng) => eng.movetime(500),
         Err(e) => {
             eprintln!("Failed to start engine '{}': {}", engine_path, e);
-            return;
+            std::process::exit(1);
         }
     };
     let mut game = Chess::default();
@@ -296,6 +296,14 @@ fn main() {
                 );
                 let _ = stdin().read_line(&mut String::new());
                 break;
+            }
+            "help" | "h" => {
+                render(
+                    game.board(),
+                    &moves,
+                    "Commands: e4 (pawn), Nf3 (piece), O-O (castle), undo (u), resign, draw, help (h)",
+                );
+                continue;
             }
             _ => {}
         }
