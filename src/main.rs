@@ -219,11 +219,13 @@ fn render(board: &Board, moves: &[String], status: &str, last_move: Option<(Squa
 struct Config {
     engine_path: String,
     play_as_black: bool,
+    skill_level: Option<u32>,
 }
 
 fn parse_args() -> Config {
     let mut engine_path: Option<String> = None;
     let mut play_as_black = false;
+    let mut skill_level: Option<u32> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -249,6 +251,20 @@ fn parse_args() -> Config {
                     }
                 }
             }
+            "--skill" | "-l" => {
+                let level = args.next().unwrap_or_else(|| {
+                    eprintln!("error: --skill requires a level (0-20)");
+                    eprintln!("Try `termchess --help` for more information.");
+                    std::process::exit(1);
+                });
+                match level.parse::<u32>() {
+                    Ok(0..=20) => skill_level = Some(level.parse().unwrap()),
+                    _ => {
+                        eprintln!("error: invalid skill level '{}' (use 0-20)", level);
+                        std::process::exit(1);
+                    }
+                }
+            }
             "--help" | "-h" => {
                 println!("Usage: termchess [OPTIONS]");
                 println!();
@@ -258,6 +274,7 @@ fn parse_args() -> Config {
                 println!("  -e, --engine <PATH>  Path to UCI engine executable");
                 println!("                        (default: stockfish, or $STOCKFISH_PATH)");
                 println!("  -s, --side <SIDE>    Play as white or black (default: white)");
+                println!("  -l, --skill <LEVEL>  Set engine skill level 0-20 (default: max)");
                 println!("  -h, --help           Print this help message");
                 println!("  -V, --version        Print version");
                 std::process::exit(0);
@@ -280,6 +297,7 @@ fn parse_args() -> Config {
                 .unwrap_or_else(|| "stockfish".to_string())
         }),
         play_as_black,
+        skill_level,
     }
 }
 
@@ -292,6 +310,9 @@ fn main() {
             std::process::exit(1);
         }
     };
+    if let Some(level) = cfg.skill_level {
+        let _ = engine.set_option("Skill Level", &level.to_string());
+    }
     let mut game = Chess::default();
     let mut moves: Vec<String> = vec![];
     let mut positions: Vec<String> = vec![board_fen(&game)];
