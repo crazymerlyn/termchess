@@ -97,6 +97,39 @@ fn piece_to_char(p: Piece) -> char {
     )
 }
 
+fn board_fen(game: &Chess) -> String {
+    Fen::from_position(game.clone(), shakmaty::EnPassantMode::Always).to_string()
+}
+
+fn apply_move(
+    game: &mut Chess,
+    mov: &shakmaty::Move,
+    halfmove_clock: &mut u32,
+    moves: &mut Vec<String>,
+    positions: &mut Vec<String>,
+    game_states: &mut Vec<Chess>,
+    clock_history: &mut Vec<u32>,
+) -> Result<(), String> {
+    let san_str = San::from_move(game, mov).to_string();
+    let role = game.board().role_at(mov.from().unwrap());
+    let capture = game.board().role_at(mov.to()).is_some()
+        || game.ep_square(shakmaty::EnPassantMode::Always) == Some(mov.to());
+    match game.clone().play(mov) {
+        Err(_) => return Err("Internal error: failed to play move".to_string()),
+        Ok(new_game) => *game = new_game,
+    }
+    if role == Some(Role::Pawn) || capture {
+        *halfmove_clock = 0;
+    } else {
+        *halfmove_clock += 1;
+    }
+    moves.push(san_str);
+    positions.push(board_fen(game));
+    game_states.push(game.clone());
+    clock_history.push(*halfmove_clock);
+    Ok(())
+}
+
 fn check_draw(positions: &[String], halfmove_clock: u32) -> Option<String> {
     if halfmove_clock >= 100 {
         return Some("Draw by 50-move rule".to_string());
@@ -163,14 +196,16 @@ fn main() {
     };
     let mut game = Chess::default();
     let mut moves: Vec<String> = vec![];
-    let mut positions: Vec<String> = vec![
-        Fen::from_position(game.clone(), shakmaty::EnPassantMode::Always).to_string(),
-    ];
+    let mut positions: Vec<String> = vec![board_fen(&game)];
     let mut halfmove_clock: u32 = 0;
     let mut game_states: Vec<Chess> = vec![game.clone()];
     let mut clock_history: Vec<u32> = vec![0];
 
-    render(game.board(), &moves, "Welcome to termchess!");
+    render(
+        game.board(),
+        &moves,
+        "Welcome to termchess! Enter a move, or type undo/resign/draw.",
+    );
 
     loop {
         let mut input = String::new();
@@ -188,18 +223,22 @@ fn main() {
                     halfmove_clock = *clock_history.last().unwrap();
                     moves.truncate(moves.len() - 2);
                     positions.truncate(positions.len() - 2);
+                    let side = if game.turn().is_white() { "White" } else { "Black" };
+                    render(game.board(), &moves, &format!("Undo. {} to move:", side));
+                } else {
+                    render(game.board(), &moves, "Nothing to undo.");
                 }
-                let side = if game.turn().is_white() { "White" } else { "Black" };
-                render(game.board(), &moves, &format!("Undo. {} to move:", side));
                 continue;
             }
             "resign" => {
                 let winner = if game.turn().is_white() { "Black" } else { "White" };
-                render(game.board(), &moves, &format!("{} wins by resignation!", winner));
+                render(game.board(), &moves, &format!("{} wins by resignation! Press Enter to exit.", winner));
+                let _ = stdin().read_line(&mut String::new());
                 break;
             }
             "draw" => {
-                render(game.board(), &moves, "Draw by agreement.");
+                render(game.board(), &moves, "Draw by agreement! Press Enter to exit.");
+                let _ = stdin().read_line(&mut String::new());
                 break;
             }
             _ => {}
@@ -227,27 +266,18 @@ fn main() {
                     continue;
                 }
                 Ok(mov) => {
-                    let san_str = San::from_move(&game, &mov).to_string();
-                    let role = game.board().role_at(mov.from().unwrap());
-                    let capture = game.board().role_at(mov.to()).is_some()
-                        || game.ep_square(shakmaty::EnPassantMode::Always) == Some(mov.to());
-                    match game.play(&mov) {
-                        Err(_) => {
-                            eprintln!("Internal error: failed to play move");
-                            break;
-                        }
-                        Ok(new_game) => game = new_game,
+                    if let Err(e) = apply_move(
+                        &mut game,
+                        &mov,
+                        &mut halfmove_clock,
+                        &mut moves,
+                        &mut positions,
+                        &mut game_states,
+                        &mut clock_history,
+                    ) {
+                        eprintln!("{}", e);
+                        break;
                     }
-                    if role == Some(Role::Pawn) || capture {
-                        halfmove_clock = 0;
-                    } else {
-                        halfmove_clock += 1;
-                    }
-                    moves.push(san_str);
-                    positions.push(
-                        Fen::from_position(game.clone(), shakmaty::EnPassantMode::Always)
-                            .to_string(),
-                    );
 
                     if let Some(outcome) = game.outcome() {
                         render(game.board(), &moves, &format!("Game over! {}", outcome));
@@ -260,8 +290,7 @@ fn main() {
 
                     render(game.board(), &moves, "Thinking...");
 
-                    let fen = Fen::from_position(game.clone(), shakmaty::EnPassantMode::Always)
-                        .to_string();
+                    let fen = board_fen(&game);
                     if engine.set_position(&fen).is_err() {
                         render(game.board(), &moves, "Engine error: failed to set position");
                         break;
@@ -296,37 +325,30 @@ fn main() {
                         }
                         Ok(m) => m,
                     };
-                    let san_str = San::from_move(&game, &engine_move).to_string();
-                    let role = game.board().role_at(engine_move.from().unwrap());
-                    let capture = game.board().role_at(engine_move.to()).is_some()
-                        || game.ep_square(shakmaty::EnPassantMode::Always) == Some(engine_move.to());
-                    match game.play(&engine_move) {
-                        Err(_) => {
-                            eprintln!("Engine error: could not play {}", engine_move_str);
-                            break;
-                        }
-                        Ok(new_game) => {
-                            game = new_game;
-                            if role == Some(Role::Pawn) || capture {
-                                halfmove_clock = 0;
-                            } else {
-                                halfmove_clock += 1;
-                            }
-                            moves.push(san_str);
-                            positions.push(
-                                Fen::from_position(game.clone(), shakmaty::EnPassantMode::Always)
-                                    .to_string(),
-                            );
+                    if let Err(_) = apply_move(
+                        &mut game,
+                        &engine_move,
+                        &mut halfmove_clock,
+                        &mut moves,
+                        &mut positions,
+                        &mut game_states,
+                        &mut clock_history,
+                    ) {
+                        render(
+                            game.board(),
+                            &moves,
+                            &format!("Engine error: could not play {}", engine_move_str),
+                        );
+                        break;
+                    }
 
-                            if let Some(outcome) = game.outcome() {
-                                render(game.board(), &moves, &format!("Game over! {}", outcome));
-                                break;
-                            }
-                            if let Some(msg) = check_draw(&positions, halfmove_clock) {
-                                render(game.board(), &moves, &msg);
-                                break;
-                            }
-                        }
+                    if let Some(outcome) = game.outcome() {
+                        render(game.board(), &moves, &format!("Game over! {}", outcome));
+                        break;
+                    }
+                    if let Some(msg) = check_draw(&positions, halfmove_clock) {
+                        render(game.board(), &moves, &msg);
+                        break;
                     }
 
                     let side = if game.turn().is_white() { "White" } else { "Black" };
@@ -415,6 +437,176 @@ mod tests {
         assert_eq!(piece_to_char(b), '♛');
         let b = Piece { color: Color::Black, role: Role::King };
         assert_eq!(piece_to_char(b), '♚');
+    }
+
+    #[test]
+    fn test_check_draw_none_for_short_game() {
+        let game = Chess::default();
+        let positions = vec![board_fen(&game)];
+        assert_eq!(check_draw(&positions, 0), None);
+        assert_eq!(check_draw(&positions, 99), None);
+    }
+
+    #[test]
+    fn test_check_draw_fifty_move_rule() {
+        let game = Chess::default();
+        let positions = vec![board_fen(&game)];
+        assert_eq!(check_draw(&positions, 100), Some("Draw by 50-move rule".to_string()));
+        assert_eq!(check_draw(&positions, 101), Some("Draw by 50-move rule".to_string()));
+    }
+
+    #[test]
+    fn test_check_draw_threefold_repetition() {
+        let positions = vec!["fen1".into(), "fen2".into(), "fen1".into(), "fen1".into()];
+        assert_eq!(
+            check_draw(&positions, 0),
+            Some("Draw by threefold repetition".to_string())
+        );
+    }
+
+    #[test]
+    fn test_check_draw_threefold_not_reached() {
+        let positions = vec!["fen1".into(), "fen2".into(), "fen1".into()];
+        assert_eq!(check_draw(&positions, 0), None);
+    }
+
+    #[test]
+    fn test_apply_move_invalid() {
+        let mut game = Chess::default();
+        let mut halfmove_clock = 0u32;
+        let mut moves = vec![];
+        let mut positions = vec![];
+        let mut game_states = vec![];
+        let mut clock_history = vec![];
+        let mov = shakmaty::Move::Normal {
+            role: Role::Pawn,
+            from: shakmaty::Square::E2,
+            to: shakmaty::Square::E5,
+            capture: None,
+            promotion: None,
+        };
+        assert!(apply_move(
+            &mut game,
+            &mov,
+            &mut halfmove_clock,
+            &mut moves,
+            &mut positions,
+            &mut game_states,
+            &mut clock_history,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn test_apply_move_valid() {
+        let mut game = Chess::default();
+        let mut halfmove_clock = 0u32;
+        let mut moves = vec![];
+        let mut positions = vec![];
+        let mut game_states = vec![];
+        let mut clock_history = vec![];
+        let san = San::from_str("e4").unwrap();
+        let mov = san.to_move(&game).unwrap();
+        assert!(apply_move(
+            &mut game,
+            &mov,
+            &mut halfmove_clock,
+            &mut moves,
+            &mut positions,
+            &mut game_states,
+            &mut clock_history,
+        )
+        .is_ok());
+        assert_eq!(moves.len(), 1);
+        assert_eq!(game_states.len(), 1);
+        assert_eq!(clock_history.len(), 1);
+        assert_eq!(halfmove_clock, 0);
+    }
+
+    #[test]
+    fn test_apply_move_non_pawn_increments_clock() {
+        let mut game = Chess::default();
+        let m1 = San::from_str("e4").unwrap().to_move(&game).unwrap();
+        game = game.play(&m1).unwrap();
+        let m2 = San::from_str("e5").unwrap().to_move(&game).unwrap();
+        game = game.play(&m2).unwrap();
+        let mut halfmove_clock = 5u32;
+        let mut moves = vec![];
+        let mut positions = vec![];
+        let mut game_states = vec![];
+        let mut clock_history = vec![];
+        let san = San::from_str("Nf3").unwrap();
+        let mov = san.to_move(&game).unwrap();
+        assert!(apply_move(
+            &mut game,
+            &mov,
+            &mut halfmove_clock,
+            &mut moves,
+            &mut positions,
+            &mut game_states,
+            &mut clock_history,
+        )
+        .is_ok());
+        assert_eq!(halfmove_clock, 6);
+    }
+
+    #[test]
+    fn test_apply_move_pawn_resets_clock() {
+        let mut game = Chess::default();
+        let mut halfmove_clock = 10u32;
+        let mut moves = vec![];
+        let mut positions = vec![];
+        let mut game_states = vec![];
+        let mut clock_history = vec![];
+        let san = San::from_str("e4").unwrap();
+        let mov = san.to_move(&game).unwrap();
+        assert!(apply_move(
+            &mut game,
+            &mov,
+            &mut halfmove_clock,
+            &mut moves,
+            &mut positions,
+            &mut game_states,
+            &mut clock_history,
+        )
+        .is_ok());
+        assert_eq!(halfmove_clock, 0);
+    }
+
+    #[test]
+    fn test_apply_move_capture_resets_clock() {
+        let mut game = Chess::default();
+        let m1 = San::from_str("e4").unwrap().to_move(&game).unwrap();
+        game = game.play(&m1).unwrap();
+        let m2 = San::from_str("d5").unwrap().to_move(&game).unwrap();
+        game = game.play(&m2).unwrap();
+        let mut halfmove_clock = 10u32;
+        let mut moves = vec![];
+        let mut positions = vec![];
+        let mut game_states = vec![];
+        let mut clock_history = vec![];
+        let san = San::from_str("exd5").unwrap();
+        let mov = san.to_move(&game).unwrap();
+        assert!(apply_move(
+            &mut game,
+            &mov,
+            &mut halfmove_clock,
+            &mut moves,
+            &mut positions,
+            &mut game_states,
+            &mut clock_history,
+        )
+        .is_ok());
+        assert_eq!(halfmove_clock, 0);
+    }
+
+    #[test]
+    fn test_board_fen_initial() {
+        let game = Chess::default();
+        assert_eq!(
+            board_fen(&game),
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        );
     }
 
     #[test]
