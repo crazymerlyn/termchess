@@ -72,14 +72,43 @@ fn piece_to_char(p: Piece) -> char {
     )
 }
 
-fn print_board(board: &Board) {
+fn render(board: &Board, moves: &[String], status: &str) {
+    print!("\x1b[2J\x1b[H");
+    println!("  {}", status);
+    println!();
+    print!("   ");
+    for f in File::ALL {
+        print!(" {} ", f.char());
+    }
+    println!();
     for rank in Rank::ALL.iter().rev() {
+        print!(" {} ", rank.char());
         for file in File::ALL {
             let square = Square::from_coords(file, *rank);
-            print!("{}", board.piece_at(square).map_or('.', piece_to_char));
-            print!("{}", if file < File::H { ' ' } else { '\n' });
+            match board.piece_at(square) {
+                Some(p) => print!(" {} ", piece_to_char(p)),
+                None => print!(" · "),
+            }
         }
+        println!(" {}", rank.char());
     }
+    print!("   ");
+    for f in File::ALL {
+        print!(" {} ", f.char());
+    }
+    println!();
+    println!();
+    if !moves.is_empty() {
+        println!("  Moves:");
+        for (i, chunk) in moves.chunks(2).enumerate() {
+            let w = chunk.first().map(|s| s.as_str()).unwrap_or("");
+            let b = chunk.get(1).map(|s| s.as_str()).unwrap_or("");
+            println!("  {}. {:>7}  {:>7}", i + 1, w, b);
+        }
+        println!();
+    }
+    print!("  Your move: ");
+    stdout().flush().unwrap();
 }
 
 fn main() {
@@ -91,63 +120,74 @@ fn main() {
         }
     };
     let mut game = Chess::default();
+    let mut moves: Vec<String> = vec![];
 
-    println!("Welcome to termchess!");
-    println!("Enter moves in standard algebraic notation (e.g. e4, Nf3, O-O).");
-    print_board(game.board());
+    render(game.board(), &moves, "Welcome to termchess!");
 
     loop {
-        print!("Your move: ");
-        stdout().flush().unwrap();
         let mut input = String::new();
         stdin().read_line(&mut input).unwrap();
         match San::from_str(input.trim()) {
             Err(_) => {
-                eprintln!("Invalid move. Try again");
+                render(game.board(), &moves, "Invalid move. Try again:");
                 continue;
             }
             Ok(san) => match san.to_move(&game) {
                 Err(_) => {
-                    eprintln!("Illegal move. Try again");
+                    render(game.board(), &moves, "Illegal move. Try again:");
                     continue;
                 }
                 Ok(mov) => {
+                    let san_str = San::from_move(&game, &mov).to_string();
                     game = game.play(&mov).unwrap();
-                    print_board(game.board());
+                    moves.push(san_str);
+
                     if game.outcome().is_some() {
-                        println!("Game over!");
+                        render(game.board(), &moves, "Game over!");
                         break;
                     }
-                }
-            },
-        }
 
-        if game.outcome().is_some() {
-            break;
-        }
+                    render(game.board(), &moves, "Thinking...");
 
-        engine
-            .set_position(
-                Fen::from_position(game.clone(), shakmaty::EnPassantMode::Always)
-                    .to_string()
-                    .as_ref(),
-            )
-            .unwrap();
-        let engine_move_str = engine.bestmove().unwrap();
-        println!("{}", engine_move_str);
-        match parse_move(&engine_move_str, &game).to_move(&game) {
-            Err(_) => {
-                eprintln!("Engine returned illegal move: {}", engine_move_str);
-                break;
-            }
-            Ok(engine_move) => match game.play(&engine_move) {
-                Err(_) => {
-                    eprintln!("Engine move could not be played: {}", engine_move_str);
-                    break;
-                }
-                Ok(new_game) => {
-                    game = new_game;
-                    print_board(game.board());
+                    engine
+                        .set_position(
+                            Fen::from_position(game.clone(), shakmaty::EnPassantMode::Always)
+                                .to_string()
+                                .as_ref(),
+                        )
+                        .unwrap();
+                    let engine_move_str = engine.bestmove().unwrap();
+
+                    match parse_move(&engine_move_str, &game).to_move(&game) {
+                        Err(_) => {
+                            render(
+                                game.board(),
+                                &moves,
+                                &format!("Engine error: illegal move {}", engine_move_str),
+                            );
+                            break;
+                        }
+                        Ok(engine_move) => {
+                            let engine_san = San::from_move(&game, &engine_move).to_string();
+                            match game.play(&engine_move) {
+                                Err(_) => {
+                                    eprintln!("Engine error: could not play {}", engine_move_str);
+                                    break;
+                                }
+                                Ok(new_game) => {
+                                    game = new_game;
+                                    moves.push(engine_san);
+
+                                    if game.outcome().is_some() {
+                                        render(game.board(), &moves, "Game over!");
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    render(game.board(), &moves, "Your turn:");
                 }
             },
         }
