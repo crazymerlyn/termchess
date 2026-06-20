@@ -38,6 +38,17 @@ fn normalize_san(input: &str) -> String {
     chars.into_iter().collect()
 }
 
+fn normal_san(role: Role, from: Square, to: Square, promotion: Option<Role>, capture: bool) -> San {
+    San::Normal {
+        role,
+        file: Some(from.file()),
+        rank: Some(from.rank()),
+        capture,
+        to,
+        promotion,
+    }
+}
+
 fn parse_move(s: &str, game: &Chess) -> Option<San> {
     if s.len() < 4 {
         return None;
@@ -50,6 +61,7 @@ fn parse_move(s: &str, game: &Chess) -> Option<San> {
         None
     };
     let role = game.board().role_at(from)?;
+    let capture = game.board().role_at(to).is_some();
     if role == Role::King {
         let file_diff: i32 = from.file() - to.file();
         if file_diff == 2 {
@@ -57,24 +69,10 @@ fn parse_move(s: &str, game: &Chess) -> Option<San> {
         } else if file_diff == -2 {
             Some(San::Castle(CastlingSide::KingSide))
         } else {
-            Some(San::Normal {
-                role,
-                file: Some(from.file()),
-                rank: Some(from.rank()),
-                capture: game.board().role_at(to).is_some(),
-                to,
-                promotion,
-            })
+            Some(normal_san(role, from, to, promotion, capture))
         }
     } else {
-        Some(San::Normal {
-            role,
-            file: Some(from.file()),
-            rank: Some(from.rank()),
-            capture: game.board().role_at(to).is_some(),
-            to,
-            promotion,
-        })
+        Some(normal_san(role, from, to, promotion, capture))
     }
 }
 
@@ -127,10 +125,15 @@ fn render(board: &Board, moves: &[String], status: &str) {
     println!();
     if !moves.is_empty() {
         println!("  Moves:");
-        for (i, chunk) in moves.chunks(2).enumerate() {
+        let total = moves.len();
+        let start = total.saturating_sub(16);
+        if start > 0 {
+            println!("  ...");
+        }
+        for (i, chunk) in moves[start..].chunks(2).enumerate() {
             let w = chunk.first().map(|s| s.as_str()).unwrap_or("");
             let b = chunk.get(1).map(|s| s.as_str()).unwrap_or("");
-            println!("  {}. {:>7}  {:>7}", i + 1, w, b);
+            println!("  {}. {:>7}  {:>7}", (start / 2) + i + 1, w, b);
         }
         println!();
     }
