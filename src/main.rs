@@ -11,7 +11,7 @@ use shakmaty::Role;
 use shakmaty::Square;
 use uci::Engine;
 
-use std::io::{stdout, Write, stdin};
+use std::io::{stdin, stdout, Write};
 use std::str::FromStr;
 
 fn normalize_san(input: &str) -> String {
@@ -190,7 +190,10 @@ fn main() {
     let engine = match Engine::new("stockfish") {
         Ok(eng) => eng.movetime(500),
         Err(e) => {
-            eprintln!("Failed to start Stockfish: {}. Is it installed and on your PATH?", e);
+            eprintln!(
+                "Failed to start Stockfish: {}. Is it installed and on your PATH?",
+                e
+            );
             return;
         }
     };
@@ -223,7 +226,11 @@ fn main() {
                     halfmove_clock = *clock_history.last().unwrap();
                     moves.truncate(moves.len() - 2);
                     positions.truncate(positions.len() - 2);
-                    let side = if game.turn().is_white() { "White" } else { "Black" };
+                    let side = if game.turn().is_white() {
+                        "White"
+                    } else {
+                        "Black"
+                    };
                     render(game.board(), &moves, &format!("Undo. {} to move:", side));
                 } else {
                     render(game.board(), &moves, "Nothing to undo.");
@@ -231,13 +238,25 @@ fn main() {
                 continue;
             }
             "resign" => {
-                let winner = if game.turn().is_white() { "Black" } else { "White" };
-                render(game.board(), &moves, &format!("{} wins by resignation! Press Enter to exit.", winner));
+                let winner = if game.turn().is_white() {
+                    "Black"
+                } else {
+                    "White"
+                };
+                render(
+                    game.board(),
+                    &moves,
+                    &format!("{} wins by resignation! Press Enter to exit.", winner),
+                );
                 let _ = stdin().read_line(&mut String::new());
                 break;
             }
             "draw" => {
-                render(game.board(), &moves, "Draw by agreement! Press Enter to exit.");
+                render(
+                    game.board(),
+                    &moves,
+                    "Draw by agreement! Press Enter to exit.",
+                );
                 let _ = stdin().read_line(&mut String::new());
                 break;
             }
@@ -297,7 +316,11 @@ fn main() {
                     }
                     let engine_move_str = match engine.bestmove() {
                         Err(_) => {
-                            render(game.board(), &moves, "Engine error: failed to get best move");
+                            render(
+                                game.board(),
+                                &moves,
+                                "Engine error: failed to get best move",
+                            );
                             break;
                         }
                         Ok(m) => m,
@@ -325,7 +348,7 @@ fn main() {
                         }
                         Ok(m) => m,
                     };
-                    if let Err(_) = apply_move(
+                    if apply_move(
                         &mut game,
                         &engine_move,
                         &mut halfmove_clock,
@@ -333,7 +356,9 @@ fn main() {
                         &mut positions,
                         &mut game_states,
                         &mut clock_history,
-                    ) {
+                    )
+                    .is_err()
+                    {
                         render(
                             game.board(),
                             &moves,
@@ -351,7 +376,11 @@ fn main() {
                         break;
                     }
 
-                    let side = if game.turn().is_white() { "White" } else { "Black" };
+                    let side = if game.turn().is_white() {
+                        "White"
+                    } else {
+                        "Black"
+                    };
                     render(game.board(), &moves, &format!("{} to move:", side));
                 }
             },
@@ -412,30 +441,66 @@ mod tests {
 
     #[test]
     fn test_piece_to_char() {
-        let w = Piece { color: Color::White, role: Role::Pawn };
+        let w = Piece {
+            color: Color::White,
+            role: Role::Pawn,
+        };
         assert_eq!(piece_to_char(w), '♙');
-        let w = Piece { color: Color::White, role: Role::Knight };
+        let w = Piece {
+            color: Color::White,
+            role: Role::Knight,
+        };
         assert_eq!(piece_to_char(w), '♘');
-        let w = Piece { color: Color::White, role: Role::Bishop };
+        let w = Piece {
+            color: Color::White,
+            role: Role::Bishop,
+        };
         assert_eq!(piece_to_char(w), '♗');
-        let w = Piece { color: Color::White, role: Role::Rook };
+        let w = Piece {
+            color: Color::White,
+            role: Role::Rook,
+        };
         assert_eq!(piece_to_char(w), '♖');
-        let w = Piece { color: Color::White, role: Role::Queen };
+        let w = Piece {
+            color: Color::White,
+            role: Role::Queen,
+        };
         assert_eq!(piece_to_char(w), '♕');
-        let w = Piece { color: Color::White, role: Role::King };
+        let w = Piece {
+            color: Color::White,
+            role: Role::King,
+        };
         assert_eq!(piece_to_char(w), '♔');
 
-        let b = Piece { color: Color::Black, role: Role::Pawn };
+        let b = Piece {
+            color: Color::Black,
+            role: Role::Pawn,
+        };
         assert_eq!(piece_to_char(b), '♟');
-        let b = Piece { color: Color::Black, role: Role::Knight };
+        let b = Piece {
+            color: Color::Black,
+            role: Role::Knight,
+        };
         assert_eq!(piece_to_char(b), '♞');
-        let b = Piece { color: Color::Black, role: Role::Bishop };
+        let b = Piece {
+            color: Color::Black,
+            role: Role::Bishop,
+        };
         assert_eq!(piece_to_char(b), '♝');
-        let b = Piece { color: Color::Black, role: Role::Rook };
+        let b = Piece {
+            color: Color::Black,
+            role: Role::Rook,
+        };
         assert_eq!(piece_to_char(b), '♜');
-        let b = Piece { color: Color::Black, role: Role::Queen };
+        let b = Piece {
+            color: Color::Black,
+            role: Role::Queen,
+        };
         assert_eq!(piece_to_char(b), '♛');
-        let b = Piece { color: Color::Black, role: Role::King };
+        let b = Piece {
+            color: Color::Black,
+            role: Role::King,
+        };
         assert_eq!(piece_to_char(b), '♚');
     }
 
@@ -451,8 +516,14 @@ mod tests {
     fn test_check_draw_fifty_move_rule() {
         let game = Chess::default();
         let positions = vec![board_fen(&game)];
-        assert_eq!(check_draw(&positions, 100), Some("Draw by 50-move rule".to_string()));
-        assert_eq!(check_draw(&positions, 101), Some("Draw by 50-move rule".to_string()));
+        assert_eq!(
+            check_draw(&positions, 100),
+            Some("Draw by 50-move rule".to_string())
+        );
+        assert_eq!(
+            check_draw(&positions, 101),
+            Some("Draw by 50-move rule".to_string())
+        );
     }
 
     #[test]
