@@ -164,6 +164,60 @@ fn check_draw(positions: &[String], halfmove_clock: u32) -> Option<String> {
     None
 }
 
+fn turn_status(game: &Chess) -> String {
+    let side = if game.turn().is_white() { "White" } else { "Black" };
+    format!("{} to move:", side)
+}
+
+fn generate_pgn(moves: &[String], player_white: bool, result: &str) -> String {
+    let date = chrono_tag();
+    let (white_name, black_name) = if player_white {
+        ("Human", "Engine")
+    } else {
+        ("Engine", "Human")
+    };
+    let mut pgn = format!(
+        "[Event \"Termchess Game\"]\n[Site \"?\"]\n[Date \"{}\"]\n[Round \"1\"]\n[White \"{}\"]\n[Black \"{}\"]\n[Result \"{}\"]\n\n",
+        date, white_name, black_name, result
+    );
+    for (i, chunk) in moves.chunks(2).enumerate() {
+        let w = chunk.first().map(|s| s.as_str()).unwrap_or("");
+        let b = chunk.get(1).map(|s| s.as_str()).unwrap_or("");
+        if !b.is_empty() {
+            pgn.push_str(&format!("{}. {} {} ", i + 1, w, b));
+        } else {
+            pgn.push_str(&format!("{}. {} ", i + 1, w));
+        }
+    }
+    pgn.push_str(result);
+    pgn.push('\n');
+    pgn
+}
+
+fn chrono_tag() -> String {
+    use std::time::SystemTime;
+    match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(d) => {
+            let secs = d.as_secs();
+            let days = secs / 86400;
+            let y = 1970 + (days as f64 / 365.25) as u64;
+            let remaining = days - ((y - 1970) as f64 * 365.25) as u64;
+            let is_leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+            let month_days = [31, if is_leap {29} else {28}, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+            let mut m = 1;
+            let mut rem = remaining;
+            for days_in_month in &month_days {
+                if rem < *days_in_month { break; }
+                rem -= days_in_month;
+                m += 1;
+            }
+            let d = rem + 1;
+            format!("{:04}.{:02}.{:02}", y, m, d)
+        }
+        Err(_) => "????.??.??".to_string(),
+    }
+}
+
 fn render(board: &Board, moves: &[String], status: &str, last_move: Option<(Square, Square)>, flip: bool) {
     print!("\x1b[2J\x1b[H");
     println!("  {}", status);
@@ -220,12 +274,14 @@ struct Config {
     engine_path: String,
     play_as_black: bool,
     skill_level: Option<u32>,
+    movetime_ms: u32,
 }
 
 fn parse_args() -> Config {
     let mut engine_path: Option<String> = None;
     let mut play_as_black = false;
     let mut skill_level: Option<u32> = None;
+    let mut movetime_ms: u32 = 500;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -265,6 +321,20 @@ fn parse_args() -> Config {
                     }
                 }
             }
+            "--movetime" | "-t" => {
+                let ms = args.next().unwrap_or_else(|| {
+                    eprintln!("error: --movetime requires a millisecond argument");
+                    eprintln!("Try `termchess --help` for more information.");
+                    std::process::exit(1);
+                });
+                match ms.parse::<u32>() {
+                    Ok(v) => movetime_ms = v,
+                    _ => {
+                        eprintln!("error: invalid movetime '{}' (use milliseconds)", ms);
+                        std::process::exit(1);
+                    }
+                }
+            }
             "--help" | "-h" => {
                 println!("Usage: termchess [OPTIONS]");
                 println!();
@@ -275,6 +345,7 @@ fn parse_args() -> Config {
                 println!("                        (default: stockfish, or $STOCKFISH_PATH)");
                 println!("  -s, --side <SIDE>    Play as white or black (default: white)");
                 println!("  -l, --skill <LEVEL>  Set engine skill level 0-20 (default: max)");
+                println!("  -t, --movetime <MS>  Engine thinking time in ms (default: 500)");
                 println!("  -h, --help           Print this help message");
                 println!("  -V, --version        Print version");
                 std::process::exit(0);
@@ -298,13 +369,14 @@ fn parse_args() -> Config {
         }),
         play_as_black,
         skill_level,
+        movetime_ms,
     }
 }
 
 fn main() {
     let cfg = parse_args();
     let engine = match Engine::new(&cfg.engine_path) {
-        Ok(eng) => eng.movetime(500),
+        Ok(eng) => eng.movetime(cfg.movetime_ms),
         Err(e) => {
             eprintln!("Failed to start engine '{}': {}", cfg.engine_path, e);
             std::process::exit(1);
@@ -326,7 +398,7 @@ fn main() {
         match play_engine_move(&engine, &mut game, &mut halfmove_clock, &mut moves, &mut positions, &mut game_states, &mut clock_history) {
             Ok(m) => {
                 last_move = Some((m.from().unwrap(), m.to()));
-                render(game.board(), &moves, "Black to move:", last_move, flip);
+                render(game.board(), &moves, &turn_status(&game), last_move, flip);
             }
             Err(e) => {
                 render(game.board(), &moves, &e, last_move, flip);
@@ -360,18 +432,14 @@ fn main() {
                     moves.truncate(moves.len() - 2);
                     positions.truncate(positions.len() - 2);
                     last_move = None;
-                    let side = if game.turn().is_white() {
-                        "White"
-                    } else {
-                        "Black"
-                    };
-                    render(game.board(), &moves, &format!("Undo. {} to move:", side), last_move, flip);
+                    render(game.board(), &moves, &format!("Undo. {}", turn_status(&game)), last_move, flip);
                 } else {
                     render(game.board(), &moves, "Nothing to undo.", last_move, flip);
                 }
                 continue;
             }
             "resign" => {
+                let result = if game.turn().is_white() { "0-1" } else { "1-0" };
                 let winner = if game.turn().is_white() {
                     "Black"
                 } else {
@@ -385,6 +453,7 @@ fn main() {
                     flip,
                 );
                 let _ = stdin().read_line(&mut String::new());
+                println!("\n{}", generate_pgn(&moves, !cfg.play_as_black, result));
                 break;
             }
             "draw" => {
@@ -396,6 +465,7 @@ fn main() {
                     flip,
                 );
                 let _ = stdin().read_line(&mut String::new());
+                println!("\n{}", generate_pgn(&moves, !cfg.play_as_black, "1/2-1/2"));
                 break;
             }
             "help" | "h" => {
@@ -445,16 +515,20 @@ fn main() {
                         &mut clock_history,
                     ) {
                         eprintln!("{}", e);
+                        println!("{}", generate_pgn(&moves, !cfg.play_as_black, "*"));
                         break;
                     }
                     last_move = Some((mov.from().unwrap(), mov.to()));
 
                     if let Some(outcome) = game.outcome() {
+                        let result = outcome.to_string();
                         render(game.board(), &moves, &format!("Game over! {}", outcome), last_move, flip);
+                        println!("\n{}", generate_pgn(&moves, !cfg.play_as_black, &result));
                         break;
                     }
                     if let Some(msg) = check_draw(&positions, halfmove_clock) {
                         render(game.board(), &moves, &msg, last_move, flip);
+                        println!("\n{}", generate_pgn(&moves, !cfg.play_as_black, "1/2-1/2"));
                         break;
                     }
 
@@ -466,25 +540,24 @@ fn main() {
                         }
                         Err(e) => {
                             render(game.board(), &moves, &e, last_move, flip);
+                            println!("\n{}", generate_pgn(&moves, !cfg.play_as_black, "*"));
                             break;
                         }
                     }
 
                     if let Some(outcome) = game.outcome() {
+                        let result = outcome.to_string();
                         render(game.board(), &moves, &format!("Game over! {}", outcome), last_move, flip);
+                        println!("\n{}", generate_pgn(&moves, !cfg.play_as_black, &result));
                         break;
                     }
                     if let Some(msg) = check_draw(&positions, halfmove_clock) {
                         render(game.board(), &moves, &msg, last_move, flip);
+                        println!("\n{}", generate_pgn(&moves, !cfg.play_as_black, "1/2-1/2"));
                         break;
                     }
 
-                    let side = if game.turn().is_white() {
-                        "White"
-                    } else {
-                        "Black"
-                    };
-                    render(game.board(), &moves, &format!("{} to move:", side), last_move, flip);
+                    render(game.board(), &moves, &turn_status(&game), last_move, flip);
                 }
             },
         }
@@ -771,6 +844,42 @@ mod tests {
     fn test_parse_move_no_piece_at_source() {
         let game = Chess::default();
         assert!(parse_move("e4e5", &game).is_none());
+    }
+
+    #[test]
+    fn test_generate_pgn_header_and_result() {
+        let moves = vec!["e4".into(), "e5".into(), "Nf3".into(), "Nc6".into()];
+        let pgn = generate_pgn(&moves, true, "1-0");
+        assert!(pgn.starts_with("[Event \"Termchess Game\"]\n"));
+        assert!(pgn.contains("[White \"Human\"]\n"));
+        assert!(pgn.contains("[Black \"Engine\"]\n"));
+        assert!(pgn.contains("[Result \"1-0\"]\n"));
+        assert!(pgn.ends_with("1-0\n"));
+    }
+
+    #[test]
+    fn test_generate_pgn_black_player() {
+        let moves = vec!["d4".into(), "d5".into()];
+        let pgn = generate_pgn(&moves, false, "0-1");
+        assert!(pgn.contains("[White \"Engine\"]\n"));
+        assert!(pgn.contains("[Black \"Human\"]\n"));
+        assert!(pgn.contains("[Result \"0-1\"]\n"));
+    }
+
+    #[test]
+    fn test_generate_pgn_move_text() {
+        let moves = vec!["e4".into(), "e5".into(), "Nf3".into()];
+        let pgn = generate_pgn(&moves, true, "*");
+        assert!(pgn.contains("1. e4 e5 "));
+        assert!(pgn.contains("2. Nf3 "));
+        assert!(pgn.ends_with("*\n"));
+    }
+
+    #[test]
+    fn test_generate_pgn_draw_result() {
+        let pgn = generate_pgn(&[], true, "1/2-1/2");
+        assert!(pgn.contains("[Result \"1/2-1/2\"]\n"));
+        assert!(pgn.ends_with("1/2-1/2\n"));
     }
 
     #[test]
