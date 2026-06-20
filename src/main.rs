@@ -162,7 +162,7 @@ fn main() {
         }
         match San::from_str(&normalize_san(&input)) {
             Err(_) => {
-                render(game.board(), &moves, "Invalid move. Try again:");
+                render(game.board(), &moves, "Invalid move. Use e4 (pawn), Nf3 (piece), or O-O (castle):");
                 continue;
             }
             Ok(san) => match san.to_move(&game) {
