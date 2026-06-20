@@ -14,6 +14,30 @@ use uci::Engine;
 use std::io::{stdout, Write, stdin};
 use std::str::FromStr;
 
+fn normalize_san(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.eq_ignore_ascii_case("o-o") {
+        return "O-O".to_string();
+    }
+    if trimmed.eq_ignore_ascii_case("o-o-o") {
+        return "O-O-O".to_string();
+    }
+    let mut chars: Vec<char> = trimmed.chars().collect();
+    if let Some(first) = chars.first_mut() {
+        match first {
+            'n' | 'r' | 'q' | 'k' => *first = first.to_ascii_uppercase(),
+            _ => {}
+        }
+    }
+    for i in 0..chars.len().saturating_sub(1) {
+        if chars[i] == '=' {
+            chars[i + 1] = chars[i + 1].to_ascii_uppercase();
+            break;
+        }
+    }
+    chars.into_iter().collect()
+}
+
 fn parse_move(s: &str, game: &Chess) -> San {
     let from: Square = s[..2].parse().unwrap();
     let to: Square = s[2..4].parse().unwrap();
@@ -127,7 +151,7 @@ fn main() {
     loop {
         let mut input = String::new();
         stdin().read_line(&mut input).unwrap();
-        match San::from_str(input.trim()) {
+        match San::from_str(&normalize_san(&input)) {
             Err(_) => {
                 render(game.board(), &moves, "Invalid move. Try again:");
                 continue;
