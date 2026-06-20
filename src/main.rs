@@ -186,13 +186,28 @@ fn render(board: &Board, moves: &[String], status: &str) {
     let _ = stdout().flush();
 }
 
+fn parse_args() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--engine" || arg == "-e" {
+            return args.next();
+        }
+    }
+    None
+}
+
 fn main() {
-    let engine = match Engine::new("stockfish") {
+    let engine_path = parse_args().unwrap_or_else(|| {
+        std::env::var("STOCKFISH_PATH")
+            .ok()
+            .unwrap_or_else(|| "stockfish".to_string())
+    });
+    let engine = match Engine::new(&engine_path) {
         Ok(eng) => eng.movetime(500),
         Err(e) => {
             eprintln!(
-                "Failed to start Stockfish: {}. Is it installed and on your PATH?",
-                e
+                "Failed to start engine '{}': {}. Is it installed and on your PATH?",
+                engine_path, e
             );
             return;
         }
