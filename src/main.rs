@@ -74,8 +74,8 @@ fn parse_move(s: &str, game: &Chess) -> Option<San> {
     Some(normal_san(role, from, to, promotion, capture))
 }
 
-fn piece_to_char(p: Piece) -> char {
-    p.color.fold_wb(
+fn piece_to_char(p: Piece) -> String {
+    let ch = p.color.fold_wb(
         match p.role {
             Role::Pawn => '♙',
             Role::Knight => '♘',
@@ -92,7 +92,12 @@ fn piece_to_char(p: Piece) -> char {
             Role::Queen => '♛',
             Role::King => '♚',
         },
-    )
+    );
+    if p.color.is_white() {
+        format!("\x1b[1;97m{}\x1b[0m", ch)
+    } else {
+        format!("\x1b[1;31m{}\x1b[0m", ch)
+    }
 }
 
 fn board_fen(game: &Chess) -> String {
@@ -486,67 +491,31 @@ mod tests {
 
     #[test]
     fn test_piece_to_char() {
-        let w = Piece {
-            color: Color::White,
-            role: Role::Pawn,
-        };
-        assert_eq!(piece_to_char(w), '♙');
-        let w = Piece {
-            color: Color::White,
-            role: Role::Knight,
-        };
-        assert_eq!(piece_to_char(w), '♘');
-        let w = Piece {
-            color: Color::White,
-            role: Role::Bishop,
-        };
-        assert_eq!(piece_to_char(w), '♗');
-        let w = Piece {
-            color: Color::White,
-            role: Role::Rook,
-        };
-        assert_eq!(piece_to_char(w), '♖');
-        let w = Piece {
-            color: Color::White,
-            role: Role::Queen,
-        };
-        assert_eq!(piece_to_char(w), '♕');
-        let w = Piece {
-            color: Color::White,
-            role: Role::King,
-        };
-        assert_eq!(piece_to_char(w), '♔');
+        let w = Piece { color: Color::White, role: Role::Pawn };
+        assert_eq!(piece_to_char(w), "\x1b[1;97m♙\x1b[0m");
+        let w = Piece { color: Color::White, role: Role::Knight };
+        assert_eq!(piece_to_char(w), "\x1b[1;97m♘\x1b[0m");
+        let w = Piece { color: Color::White, role: Role::Bishop };
+        assert_eq!(piece_to_char(w), "\x1b[1;97m♗\x1b[0m");
+        let w = Piece { color: Color::White, role: Role::Rook };
+        assert_eq!(piece_to_char(w), "\x1b[1;97m♖\x1b[0m");
+        let w = Piece { color: Color::White, role: Role::Queen };
+        assert_eq!(piece_to_char(w), "\x1b[1;97m♕\x1b[0m");
+        let w = Piece { color: Color::White, role: Role::King };
+        assert_eq!(piece_to_char(w), "\x1b[1;97m♔\x1b[0m");
 
-        let b = Piece {
-            color: Color::Black,
-            role: Role::Pawn,
-        };
-        assert_eq!(piece_to_char(b), '♟');
-        let b = Piece {
-            color: Color::Black,
-            role: Role::Knight,
-        };
-        assert_eq!(piece_to_char(b), '♞');
-        let b = Piece {
-            color: Color::Black,
-            role: Role::Bishop,
-        };
-        assert_eq!(piece_to_char(b), '♝');
-        let b = Piece {
-            color: Color::Black,
-            role: Role::Rook,
-        };
-        assert_eq!(piece_to_char(b), '♜');
-        let b = Piece {
-            color: Color::Black,
-            role: Role::Queen,
-        };
-        assert_eq!(piece_to_char(b), '♛');
-        let b = Piece {
-            color: Color::Black,
-            role: Role::King,
-        };
-        assert_eq!(piece_to_char(b), '♚');
+        let b = Piece { color: Color::Black, role: Role::Pawn };
+        assert_eq!(piece_to_char(b), "\x1b[1;31m♟\x1b[0m");
+        let b = Piece { color: Color::Black, role: Role::Knight };
+        assert_eq!(piece_to_char(b), "\x1b[1;31m♞\x1b[0m");
+        let b = Piece { color: Color::Black, role: Role::Bishop };
+        assert_eq!(piece_to_char(b), "\x1b[1;31m♝\x1b[0m");
+        let b = Piece { color: Color::Black, role: Role::Rook };
+        assert_eq!(piece_to_char(b), "\x1b[1;31m♜\x1b[0m");
+        let b = Piece { color: Color::Black, role: Role::Queen };
+        assert_eq!(piece_to_char(b), "\x1b[1;31m♛\x1b[0m");
+        let b = Piece { color: Color::Black, role: Role::King };
+        assert_eq!(piece_to_char(b), "\x1b[1;31m♚\x1b[0m");
     }
 
     #[test]
